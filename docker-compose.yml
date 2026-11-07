@@ -1,0 +1,159 @@
+version: "3.9"
+
+networks:
+  cloudpulse-network:
+    driver: bridge
+
+volumes:
+  cloudpulse_pgdata:
+    driver: local
+  grafana_data:
+    driver: local
+
+services:
+  # ─────────────────────────── Application API ────────────────────────────
+  cloudpulse-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: cloudpulse-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-cloudpulse}:${POSTGRES_PASSWORD:-cloudpulse_secret}@postgres:5432/${POSTGRES_DB:-cloudpulse}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cloudpulse-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "com.cloudpulse.service=api"
+      - "com.cloudpulse.version=1.0.0"
+
+  # ─────────────────────────── PostgreSQL 15 ──────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: cloudpulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cloudpulse}
+      POSTGRES_USER: ${POSTGRES_USER:-cloudpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudpulse_secret}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - cloudpulse_pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - cloudpulse-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudpulse} -d ${POSTGRES_DB:-cloudpulse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      - "com.cloudpulse.service=database"
+
+  # ─────────────────────────── Redis 7 ────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cloudpulse-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    networks:
+      - cloudpulse-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    labels:
+      - "com.cloudpulse.service=cache"
+
+  # ─────────────────────────── Prometheus ─────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cloudpulse-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus_rules.yml:/etc/prometheus/rules/prometheus_rules.yml:ro
+    networks:
+      - cloudpulse-network
+    depends_on:
+      - cloudpulse-api
+    labels:
+      - "com.cloudpulse.service=monitoring"
+
+  # ─────────────────────────── Grafana ────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cloudpulse-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:-cloudpulse_grafana}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - cloudpulse-network
+    depends_on:
+      - prometheus
+    labels:
+      - "com.cloudpulse.service=visualization"
+
+  # ─────────────────────────── Alertmanager ───────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: cloudpulse-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--log.level=info"
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./docker/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks:
+      - cloudpulse-network
+    labels:
+      - "com.cloudpulse.service=alerting"

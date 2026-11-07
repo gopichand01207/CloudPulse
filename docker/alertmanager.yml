@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Alertmanager — CloudPulse Routing & Receiver Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  # SMTP settings for email notifications
+  smtp_smarthost: "smtp.gmail.com:587"
+  smtp_from: "cloudpulse-alerts@yourcompany.com"
+  smtp_auth_username: "your-email@gmail.com"
+  smtp_auth_password: "your-app-password"
+  smtp_require_tls: true
+
+  # Slack API URL for workspace integration
+  slack_api_url: "https://hooks.slack.com/services/xxx/yyy/zzz"
+
+  # How long to wait before firing a resolved notification
+  resolve_timeout: 5m
+
+# ── Inhibition Rules ──────────────────────────────────────────────────────────
+inhibit_rules:
+  # If a critical alert is firing for a service, suppress warnings for the same service
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal:
+      - alertname
+      - server_id
+
+# ── Routing Tree ──────────────────────────────────────────────────────────────
+route:
+  receiver: cloudpulse-alerts
+  group_by:
+    - alertname
+    - severity
+    - server_id
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+
+  routes:
+    # Critical alerts get shorter repeat interval
+    - match:
+        severity: critical
+      receiver: cloudpulse-alerts
+      group_wait: 10s
+      repeat_interval: 30m
+      continue: false
+
+    # Warning alerts — standard cadence
+    - match:
+        severity: warning
+      receiver: cloudpulse-alerts
+      repeat_interval: 1h
+      continue: false
+
+# ── Receivers ─────────────────────────────────────────────────────────────────
+receivers:
+  - name: cloudpulse-alerts
+
+    # ── Email ──────────────────────────────────────────────────────────────
+    email_configs:
+      - to: "alerts@yourcompany.com"
+        send_resolved: true
+        headers:
+          Subject: '[CloudPulse] {{ .Status | toUpper }} — {{ .CommonLabels.alertname }}'
+        html: |
+          <h2 style="color:{{ if eq .Status "firing" }}#D32F2F{{ else }}#388E3C{{ end }}">
+            CloudPulse Alert: {{ .Status | toUpper }}
+          </h2>
+          <table border="1" cellpadding="6" cellspacing="0">
+            {{ range .Alerts }}
+            <tr><th>Alert</th><td>{{ .Labels.alertname }}</td></tr>
+            <tr><th>Severity</th><td>{{ .Labels.severity }}</td></tr>
+            <tr><th>Summary</th><td>{{ .Annotations.summary }}</td></tr>
+            <tr><th>Description</th><td>{{ .Annotations.description }}</td></tr>
+            <tr><th>Start</th><td>{{ .StartsAt }}</td></tr>
+            {{ end }}
+          </table>
+
+    # ── Slack ──────────────────────────────────────────────────────────────
+    slack_configs:
+      - channel: "#cloudpulse-alerts"
+        send_resolved: true
+        username: "CloudPulse Bot"
+        icon_emoji: ":rotating_light:"
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Server:* {{ .Labels.server_id | default "N/A" }}
+          *Started:* {{ .StartsAt }}
+          {{ end }}
+        actions:
+          - type: button
+            text: "View in Grafana"
+            url: "http://localhost:3000/d/cloudpulse-overview"

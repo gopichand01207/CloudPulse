@@ -1,0 +1,178 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus Alert Rules — CloudPulse
+# ─────────────────────────────────────────────────────────────────────────────
+
+groups:
+  # ── Infrastructure Alerts ───────────────────────────────────────────────────
+  - name: infrastructure
+    interval: 30s
+    rules:
+      # ── CPU ──────────────────────────────────────────────────────────────
+      - alert: HighCPUUsage
+        expr: cloudpulse_cpu_usage_percent > 85
+        for: 2m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "High CPU usage on {{ $labels.server_id }}"
+          description: >
+            CPU usage on server {{ $labels.server_id }} has exceeded 85%
+            (current value: {{ $value | printf "%.1f" }}%) for more than 2 minutes.
+            Investigate running processes and consider scaling out.
+          runbook: "https://wiki.yourcompany.com/runbooks/high-cpu"
+          dashboard: "http://localhost:3000/d/cloudpulse-overview?var-server={{ $labels.server_id }}"
+
+      # ── Memory ───────────────────────────────────────────────────────────
+      - alert: HighMemoryUsage
+        expr: cloudpulse_memory_usage_percent > 90
+        for: 2m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "High memory usage on {{ $labels.server_id }}"
+          description: >
+            Memory usage on {{ $labels.server_id }} is {{ $value | printf "%.1f" }}%,
+            exceeding the 90% threshold for more than 2 minutes.
+            Check for memory leaks or increase instance memory.
+          runbook: "https://wiki.yourcompany.com/runbooks/high-memory"
+
+      # ── Disk ─────────────────────────────────────────────────────────────
+      - alert: HighDiskUsage
+        expr: cloudpulse_disk_usage_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "High disk usage on {{ $labels.server_id }} ({{ $labels.mount_point }})"
+          description: >
+            Disk usage at mount point {{ $labels.mount_point }} on
+            {{ $labels.server_id }} is {{ $value | printf "%.1f" }}%.
+            Clean up old logs/data or expand the volume.
+          runbook: "https://wiki.yourcompany.com/runbooks/high-disk"
+
+      # ── Disk will fill soon (predictive) ─────────────────────────────────
+      - alert: DiskWillFillSoon
+        expr: >
+          predict_linear(cloudpulse_disk_usage_percent[1h], 4 * 3600) > 100
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "Disk on {{ $labels.server_id }} predicted to fill in < 4 h"
+          description: >
+            Based on the last hour of data, disk at {{ $labels.mount_point }}
+            on {{ $labels.server_id }} will fill within 4 hours.
+
+  # ── Service Availability ─────────────────────────────────────────────────────
+  - name: availability
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: >
+            Prometheus cannot scrape metrics from {{ $labels.job }}
+            (instance: {{ $labels.instance }}). The service has been
+            unreachable for more than 1 minute.
+          runbook: "https://wiki.yourcompany.com/runbooks/service-down"
+
+      - alert: CloudPulseAPIDown
+        expr: absent(up{job="cloudpulse-api"})
+        for: 1m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "CloudPulse API is not being scraped"
+          description: >
+            The CloudPulse API target has disappeared from Prometheus.
+            Check the container status with `docker ps`.
+
+  # ── API Performance ──────────────────────────────────────────────────────────
+  - name: api_performance
+    interval: 30s
+    rules:
+      - alert: SlowResponseTime
+        expr: >
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job="cloudpulse-api"}[5m])
+          ) * 1000 > 2000
+        for: 1m
+        labels:
+          severity: warning
+          team: dev
+        annotations:
+          summary: "Slow API response time (p95 > 2 s)"
+          description: >
+            The 95th-percentile response time for {{ $labels.handler }} is
+            {{ $value | printf "%.0f" }} ms, exceeding the 2000 ms SLA.
+            Profile the endpoint and check DB query performance.
+          runbook: "https://wiki.yourcompany.com/runbooks/slow-api"
+
+      - alert: APIHighErrorRate
+        expr: >
+          rate(http_requests_total{job="cloudpulse-api", status=~"5.."}[5m])
+          /
+          rate(http_requests_total{job="cloudpulse-api"}[5m])
+          > 0.1
+        for: 1m
+        labels:
+          severity: critical
+          team: dev
+        annotations:
+          summary: "High HTTP 5xx error rate (> 10%)"
+          description: >
+            More than 10% of requests to the CloudPulse API are returning 5xx
+            errors (current rate: {{ $value | printf "%.2f" }}).
+            Check application logs immediately.
+          runbook: "https://wiki.yourcompany.com/runbooks/high-error-rate"
+
+      - alert: APIRequestRateSpike
+        expr: >
+          rate(http_requests_total{job="cloudpulse-api"}[5m])
+          > 2 * avg_over_time(rate(http_requests_total{job="cloudpulse-api"}[5m])[1h:5m])
+        for: 5m
+        labels:
+          severity: warning
+          team: dev
+        annotations:
+          summary: "Unusual spike in API request rate"
+          description: >
+            The current request rate is more than 2× the 1-hour average.
+            Verify whether this is expected traffic or a potential DDoS / runaway client.
+
+  # ── Database ─────────────────────────────────────────────────────────────────
+  - name: database
+    interval: 60s
+    rules:
+      - alert: PostgreSQLDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: dba
+        annotations:
+          summary: "PostgreSQL exporter is unreachable"
+          description: "Cannot scrape the postgres-exporter. The database may be down."
+
+      - alert: PostgreSQLTooManyConnections
+        expr: >
+          pg_stat_activity_count > pg_settings_max_connections * 0.8
+        for: 2m
+        labels:
+          severity: warning
+          team: dba
+        annotations:
+          summary: "PostgreSQL connection count > 80% of max_connections"
+          description: >
+            {{ $value | printf "%.0f" }} connections are open, which is
+            more than 80% of max_connections. Consider connection pooling (PgBouncer).

@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus — CloudPulse Scrape Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  scrape_interval: 15s          # How frequently to scrape targets
+  evaluation_interval: 15s      # How frequently to evaluate rules
+  scrape_timeout: 10s
+  external_labels:
+    environment: production
+    project: cloudpulse
+
+# ── Alertmanager Integration ──────────────────────────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+      timeout: 10s
+      api_version: v2
+
+# ── Alert Rule Files ──────────────────────────────────────────────────────────
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# ── Scrape Configurations ─────────────────────────────────────────────────────
+scrape_configs:
+  # ── CloudPulse API (FastAPI + prometheus-fastapi-instrumentator) ────────────
+  - job_name: cloudpulse-api
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - cloudpulse-api:8000
+        labels:
+          service: api
+          environment: production
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ── Prometheus self-monitoring ────────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # ── Node Exporter (host OS metrics) ──────────────────────────────────────
+  - job_name: node-exporter
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - localhost:9100
+        labels:
+          service: node
+          environment: production
+
+  # ── PostgreSQL Exporter ───────────────────────────────────────────────────
+  - job_name: postgres-exporter
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - localhost:9187
+        labels:
+          service: database
+          environment: production
+
+  # ── Redis Exporter ────────────────────────────────────────────────────────
+  - job_name: redis-exporter
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - localhost:9121
+        labels:
+          service: cache
+          environment: production
+
+  # ── Alertmanager self-monitoring ──────────────────────────────────────────
+  - job_name: alertmanager
+    static_configs:
+      - targets:
+          - alertmanager:9093
