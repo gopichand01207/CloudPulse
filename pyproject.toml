@@ -1,0 +1,132 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CloudPulse — pyproject.toml
+# ──────────────────────────────────────────────────────────────────────────────
+
+[tool.poetry]
+name        = "cloudpulse"
+version     = "1.0.0"
+description = "Infrastructure & Microservices Observability Platform"
+authors     = ["Gopi Chand Naik Bhukya <gopichandnaik@example.com>"]
+readme      = "README.md"
+license     = "MIT"
+homepage    = "https://github.com/gopichandnaik/cloudpulse"
+repository  = "https://github.com/gopichandnaik/cloudpulse"
+keywords    = ["observability", "monitoring", "cloud", "microservices", "fastapi"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: System :: Monitoring",
+]
+
+packages = [
+    { include = "api" },
+    { include = "alerting" },
+    { include = "logging" },
+    { include = "scripts" },
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Runtime dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.poetry.dependencies]
+python              = "^3.11"
+fastapi             = ">=0.104.0"
+uvicorn             = { version = ">=0.24.0", extras = ["standard"] }
+sqlalchemy          = { version = ">=2.0.0", extras = ["asyncio"] }
+asyncpg             = ">=0.29.0"       # async Postgres driver
+aioredis            = ">=2.0.1"
+alembic             = ">=1.13.0"
+pydantic            = ">=2.4.0"
+pydantic-settings   = ">=2.0.3"
+structlog           = ">=23.1.0"
+httpx               = ">=0.25.0"
+prometheus-client   = ">=0.18.0"
+python-jose         = { version = ">=3.3.0", extras = ["cryptography"] }
+passlib             = { version = ">=1.7.4", extras = ["bcrypt"] }
+python-multipart    = ">=0.0.6"
+aiofiles            = ">=23.2.1"
+orjson              = ">=3.9.10"       # fast JSON (de)serialisation
+tenacity            = ">=8.2.3"        # retry logic for external calls
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Development / test dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.poetry.group.dev.dependencies]
+pytest              = ">=7.4.0"
+pytest-asyncio      = ">=0.21.0"
+pytest-cov          = ">=4.1.0"
+httpx               = ">=0.25.0"       # AsyncClient for tests
+aiosqlite           = ">=0.19.0"       # in-memory SQLite for tests
+black               = ">=23.10.0"
+isort               = ">=5.12.0"
+ruff                = ">=0.1.0"
+mypy                = ">=1.6.0"
+pre-commit          = ">=3.5.0"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Build system
+# ──────────────────────────────────────────────────────────────────────────────
+[build-system]
+requires      = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# pytest
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+asyncio_mode   = "auto"
+testpaths      = ["tests"]
+addopts        = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# black (code formatter)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.black]
+line-length    = 88
+target-version = ["py311"]
+include        = "\\.pyi?$"
+extend-exclude = """
+(
+  migrations/
+  | .venv/
+  | venv/
+)
+"""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# isort (import sorter)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.isort]
+profile                   = "black"
+line_length               = 88
+known_first_party         = ["api", "alerting", "logging", "scripts"]
+skip_glob                 = ["venv/*", ".venv/*", "migrations/*"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ruff (fast linter)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length    = 88
+select         = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM"]
+ignore         = ["E501"]     # line length handled by black
+exclude        = ["migrations", ".venv", "venv"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# mypy (type checker)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version         = "3.11"
+strict                 = false
+warn_return_any        = true
+warn_unused_configs    = true
+disallow_untyped_defs  = true
+ignore_missing_imports = true
+exclude                = ["migrations/", "venv/", ".venv/"]
